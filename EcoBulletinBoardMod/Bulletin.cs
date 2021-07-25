@@ -6,49 +6,56 @@ namespace Eco.Mods.BulletinBoard
     using Core.Controller;
 
     using Gameplay.Utils;
-    using Gameplay.Components;
     using Gameplay.Systems.Tooltip;
-    using Gameplay.Players;
     using Gameplay.Systems.Chat;
+    using Gameplay.Systems.TextLinks;
     using Gameplay.Civics.Demographics;
 
     using Shared.Serialization;
     using Shared.Localization;
     using Shared.Utils;
     using Shared.Services;
+    using Shared.Networking;
 
     using Simulation.Time;
 
     [Serialized]
     public class Bulletin : SimpleEntry
     {
-        [Serialized, SyncToView, TooltipChildren] public string Channel { get; set; } = "Default";
+        [Serialized] public bool IsPublished { get; set; } = false;
 
-        [Serialized, SyncToView, TooltipChildren] public TextItemData TextData { get; set; } = new TextItemData();
+        [Serialized] public BulletinChannel Channel { get; set; } = null;
+
+        [Eco] public string Text { get; set; } = "";
 
         [SyncToView]
         public override LocString Description()
         {
             var sb = new StringBuilder();
-            sb.AppendLine($"{UILinkContent()} published by {Creator?.UILinkContent() ?? "nobody"} at {TimeFormatter.FormatDateLong(CreationTime)} ({TimeFormatter.FormatTimeSince(CreationTime, WorldTime.Seconds)})");
-            sb.AppendLine(TextData.Text);
+            if (IsPublished)
+            {
+                
+                sb.AppendLine($"{UILinkContent()} published by {Creator?.UILink() ?? "nobody"} to {Channel?.UILink()} at {TimeFormatter.FormatDateLong(CreationTime)} ({TimeFormatter.FormatTimeSince(CreationTime, WorldTime.Seconds)} ago)");
+            }
+            else
+            {
+                sb.AppendLine($"{UILinkContent()} (draft) by {Creator?.UILink() ?? "nobody"}");
+            }
+            sb.AppendLine(Text);
             return sb.ToStringLoc();
         }
 
-        public static Bulletin Publish(User publisher, string channel, string text)
+        public void Publish()
         {
-            var bulletin = BulletinBoardData.Obj.Bulletins.Add() as Bulletin;
-            bulletin.Creator = publisher;
-            bulletin.Channel = channel;
-            bulletin.TextData.Text = text;
-            bulletin.NotifyPropertyChanged(bulletin, nameof(bulletin.TextData));
-            bulletin.SaveInRegistrar();
+            if (IsPublished) { return; }
+            IsPublished = true;
+            CreationTime = WorldTime.Seconds;
+            SaveInRegistrar();
             ChatManager.ServerMessageToAlias(
-                new LocString($"{publisher.UILinkContent()} has published a new bulletin under '{channel}', check it out on the Ecopedia!"),
+                new LocString($"{Creator.UILink()} has published a new bulletin under '{Channel?.UILink()}', check it out on the Ecopedia!"),
                 DemographicManager.Obj.Get(SpecialDemographics.Everyone),
                 category: MessageCategory.Mail
             );
-            return bulletin;
         }
     }
 }
