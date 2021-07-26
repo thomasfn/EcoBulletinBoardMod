@@ -18,12 +18,13 @@ namespace Eco.Mods.BulletinBoard
         public const string CATEGORY_TITLE = "Bulletins";
 
         public IEnumerable<EcopediaPageReference> PagesWeSupplyDataFor()
-            => BulletinBoardPlugin.Obj.Config.Channels.Select(channel => new EcopediaPageReference(PAGE_ICON, CATEGORY_TITLE, channel.ChannelName, Localizer.DoStr(channel.ChannelName)));
+            => BulletinBoardData.Obj.BulletinChannels.All<BulletinChannel>().Select(channel => new EcopediaPageReference(PAGE_ICON, CATEGORY_TITLE, channel.Name, Localizer.DoStr(channel.Name)));
 
         public string GetEcopediaData(Player player, EcopediaPage page)
         {
             var allBulletins = BulletinBoardData.Obj.Bulletins.All<Bulletin>()
-                .Where(bulletin => bulletin.Channel == page.Name);
+                .Where(bulletin => bulletin.IsPublished && bulletin.Channel?.Name == page.Name)
+                .OrderByDescending(bulletin => bulletin.CreationTime);
             if (!allBulletins.Any())
             {
                 return "No bulletins have been posted!";
@@ -31,7 +32,7 @@ namespace Eco.Mods.BulletinBoard
             var sb = new StringBuilder();
             foreach (var bulletin in allBulletins)
             {
-                sb.AppendLine(bulletin.Description());
+                sb.AppendLine(bulletin.FormatForBoard());
             }
             return sb.ToString();
         }
