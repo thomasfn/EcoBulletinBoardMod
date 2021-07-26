@@ -1,45 +1,43 @@
 ﻿using System;
 using System.Linq;
-using System.IO;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Threading.Tasks;
 
 namespace Eco.Mods.BulletinBoard
 {
     using Core.Plugins.Interfaces;
     using Core.Utils;
     using Core.Systems;
-    using Core.IoC;
     using Core.Serialization;
     using Core.Plugins;
+    using Core.Controller;
 
     using Shared.Localization;
-    using Shared.Math;
     using Shared.Utils;
     using Shared.Serialization;
+    using Shared.Networking;
 
     using Gameplay.Players;
+    using Gameplay.Systems;
     using Gameplay.Systems.Chat;
     using Gameplay.Systems.TextLinks;
     using Gameplay.Objects;
     using Gameplay.Components;
-    using Gameplay.Economy;
-    using Gameplay.EcopediaRoot;
-    using Gameplay.Civics.Demographics;
-    using Eco.Shared.Services;
-    using System.ComponentModel;
-    using Eco.Core.Controller;
 
     [Serialized]
     public class BulletinBoardData : Singleton<BulletinBoardData>, IStorage
     {
         public IPersistent StorageHandle { get; set; }
 
+        [Serialized] public Registrar BulletinChannels = new Registrar();
+
         [Serialized] public Registrar Bulletins = new Registrar();
 
         public void InitializeRegistrars()
         {
-            this.Bulletins.Init(Localizer.DoStr("Bulletins"), true, typeof(Bulletin), BulletinBoardPlugin.Obj, Localizer.DoStr("Current Elections"));
+            this.BulletinChannels.Init(Localizer.DoStr("Bulletin Channels"), true, typeof(BulletinChannel), BulletinBoardPlugin.Obj, Localizer.DoStr("Bulletin Channels"));
+            this.Bulletins.Init(Localizer.DoStr("Bulletins"), true, typeof(Bulletin), BulletinBoardPlugin.Obj, Localizer.DoStr("Bulletins"));
         }
 
         public void Initialize()
@@ -51,15 +49,8 @@ namespace Eco.Mods.BulletinBoard
     [Localized]
     public class BulletinBoardConfig
     {
-        [Localized, TypeConverter(typeof(ExpandableObjectConverter))]
-        public class ChannelSettings
-        {
-            [LocDescription("The name of the bulletin board channel.")] public string ChannelName { get; set; } = "Default";
-            public override string ToString() => string.Empty; // Do not use type's name as a value of this dropdown.
-        }
-
-        [LocDescription("Settings for each bulletin board channel.")]
-        public IEnumerable<ChannelSettings> Channels { get; set; } = new ChannelSettings[] { new ChannelSettings() };
+        [LocDescription("Maximum number of characters for a bulletin message.")]
+        public int MaxBulletinMessageLength { get; set; } = 1000;
     }
 
     [Localized, LocDisplayName(nameof(BulletinBoardPlugin)), Priority(PriorityAttribute.High)]
@@ -90,25 +81,71 @@ namespace Eco.Mods.BulletinBoard
 
         public void OnEditObjectChanged(object o, string param)
         {
-            switch (param) // Parse the name and trigger binded event.
-            {
-                case nameof(BulletinBoardConfig.Channels):
-                    EcopediaManager.Build();
-                    break;
-            }
             this.SaveConfig();
         }
 
         #region Chat Commands
 
-        [ChatCommand("Bulletins", ChatAuthorizationLevel.Admin)]
+        [ChatCommand("Bulletins", ChatAuthorizationLevel.User)]
         public static void Bulletins() { }
 
-        [ChatSubCommand("Bulletins", "Publishes a bulletin.", ChatAuthorizationLevel.Admin)]
-        public static void Publish(User user, string text)
+        [ChatSubCommand("Bulletins", "Publishes a bulletin.", ChatAuthorizationLevel.User)]
+        public static void Publish(User user, INetObject target)
         {
-            // TODO: Check if they have permissions to publish
-            var bulletin = Bulletin.Publish(user, "Default", text);
+            var worldObject = target as WorldObject;
+            if (worldObject == null)
+            {
+                user.Msg(Localizer.DoStr("Aim at a sign to publish the message on that sign."));
+                return;
+            }
+            var customTextComponent = worldObject.GetComponent<CustomTextComponent>();
+            if (customTextComponent == null)
+            {
+                user.Msg(Localizer.DoStr("Aim at a sign to publish the message on that sign."));
+                return;
+            }
+            var message = customTextComponent.TextData?.Text;
+            if (string.IsNullOrEmpty(message))
+            {
+                user.Msg(Localizer.DoStr("Message is too short."));
+                return;
+            }
+            if (message.Length > Obj.Config.MaxBulletinMessageLength)
+            {
+                user.Msg(Localizer.DoStr("Message is too long."));
+                return;
+            }
+            _ = PublishNewBulletin(user, customTextComponent.TextData.Text);
+        }
+
+        private static async Task PublishNewBulletin(User user, string message)
+        {
+            // Grab all channels and see if the user is able to publish to any of them
+            var allChannels = BulletinBoardData.Obj.BulletinChannels
+                .All<BulletinChannel>();
+            var allowedChannels = allChannels.Where(channel => channel.IsAllowedToPublish(user)).ToArray();
+            if (allowedChannels.Length == 0)
+            {
+                user.Msg(Localizer.Do($"You are not allowed to publish any bulletins!"));
+                return;
+            }
+
+            // Give them a choice of channels
+            var optionIndex = await user.Player.OptionBox(Localizer.DoStr("Choose channel to publish bulletin to:"), new List<string>(allowedChannels.Select(channel => channel.Name)));
+            if (optionIndex < 0 || optionIndex >= allowedChannels.Length) { return; }
+            var selectedChannel = allowedChannels[optionIndex];
+            if (selectedChannel.IsDestroyed) { return; }
+            if (!selectedChannel.IsAllowedToPublish(user))
+            {
+                user.Msg(Localizer.Do($"You are not allowed to publish bulletins to {selectedChannel.UILink()}!"));
+            }
+
+            // See if they already have an "open" bulletin, e.g. one that they started writing earlier but didn't finish
+            var bulletin = BulletinBoardData.Obj.Bulletins.Add() as Bulletin;
+            bulletin.Creator = user;
+            bulletin.Channel = selectedChannel;
+            bulletin.Text = message;
+            bulletin.Publish();
             user.Msg(new LocString($"Published {bulletin.UILink()}."));
         }
 
