@@ -16,11 +16,14 @@ namespace Eco.Mods.BulletinBoard
     using Shared.Localization;
     using Shared.Utils;
     using Shared.Serialization;
+    using Shared.Networking;
 
     using Gameplay.Players;
     using Gameplay.Systems;
     using Gameplay.Systems.Chat;
     using Gameplay.Systems.TextLinks;
+    using Gameplay.Objects;
+    using Gameplay.Components;
 
     [Serialized]
     public class BulletinBoardData : Singleton<BulletinBoardData>, IStorage
@@ -46,7 +49,8 @@ namespace Eco.Mods.BulletinBoard
     [Localized]
     public class BulletinBoardConfig
     {
-        
+        [LocDescription("Maximum number of characters for a bulletin message.")]
+        public int MaxBulletinMessageLength { get; set; } = 1000;
     }
 
     [Localized, LocDisplayName(nameof(BulletinBoardPlugin)), Priority(PriorityAttribute.High)]
@@ -85,13 +89,36 @@ namespace Eco.Mods.BulletinBoard
         [ChatCommand("Bulletins", ChatAuthorizationLevel.User)]
         public static void Bulletins() { }
 
-        [ChatSubCommand("Bulletins", "Creates a new bulletin.", ChatAuthorizationLevel.User)]
-        public static void New(User user)
+        [ChatSubCommand("Bulletins", "Publishes a bulletin.", ChatAuthorizationLevel.User)]
+        public static void Publish(User user, INetObject target)
         {
-            _ = CreateNewBulletin(user);
+            var worldObject = target as WorldObject;
+            if (worldObject == null)
+            {
+                user.Msg(Localizer.DoStr("Aim at a sign to publish the message on that sign."));
+                return;
+            }
+            var customTextComponent = worldObject.GetComponent<CustomTextComponent>();
+            if (customTextComponent == null)
+            {
+                user.Msg(Localizer.DoStr("Aim at a sign to publish the message on that sign."));
+                return;
+            }
+            var message = customTextComponent.TextData?.Text;
+            if (string.IsNullOrEmpty(message))
+            {
+                user.Msg(Localizer.DoStr("Message is too short."));
+                return;
+            }
+            if (message.Length > Obj.Config.MaxBulletinMessageLength)
+            {
+                user.Msg(Localizer.DoStr("Message is too long."));
+                return;
+            }
+            _ = PublishNewBulletin(user, customTextComponent.TextData.Text);
         }
 
-        private static async Task CreateNewBulletin(User user)
+        private static async Task PublishNewBulletin(User user, string message)
         {
             // Grab all channels and see if the user is able to publish to any of them
             var allChannels = BulletinBoardData.Obj.BulletinChannels
@@ -114,27 +141,12 @@ namespace Eco.Mods.BulletinBoard
             }
 
             // See if they already have an "open" bulletin, e.g. one that they started writing earlier but didn't finish
-            var bulletin = BulletinBoardData.Obj.Bulletins
-                .All<Bulletin>()
-                .SingleOrDefault(bulletin => bulletin.Creator == user && !bulletin.IsPublished);
-            if (bulletin == null)
-            {
-                bulletin = BulletinBoardData.Obj.Bulletins.Add() as Bulletin;
-                bulletin.Creator = user;
-            }
+            var bulletin = BulletinBoardData.Obj.Bulletins.Add() as Bulletin;
+            bulletin.Creator = user;
             bulletin.Channel = selectedChannel;
-
-            // Begin edit operation
-            var viewEditor = ViewEditor.Edit(user, bulletin, Obj, OnUserFinishedEditingBulletin, $"Publish", Color.Green);
-        }
-
-        private static void OnUserFinishedEditingBulletin(IController controller)
-        {
-            var bulletin = controller as Bulletin;
-            if (bulletin == null) { return; }
-            if (bulletin.IsPublished) { return; }
+            bulletin.Text = message;
             bulletin.Publish();
-            bulletin.Creator?.Msg(new LocString($"Published {bulletin.UILink()}."));
+            user.Msg(new LocString($"Published {bulletin.UILink()}."));
         }
 
         #endregion

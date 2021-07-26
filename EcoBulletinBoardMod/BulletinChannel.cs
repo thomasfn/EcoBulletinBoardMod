@@ -11,6 +11,7 @@ namespace Eco.Mods.BulletinBoard
     using Gameplay.Players;
     using Gameplay.Aliases;
     using Gameplay.EcopediaRoot;
+    using Gameplay.Civics.Demographics;
 
     using Shared.Serialization;
     using Shared.Localization;
@@ -20,7 +21,8 @@ namespace Eco.Mods.BulletinBoard
     [Serialized]
     public class BulletinChannel : SimpleEntry
     {
-        [Eco, AllowNull] public IAlias AllowedToPublish { get; set; }
+        [Eco, AccessNotNeeded, AllowNull, LocDescription("Who can publish bulletins to this channel via the '/bulletins publish' command")]
+        public IAlias AllowedToPublish { get; set; }
 
         [Tooltip(100)]
         public override LocString Description()

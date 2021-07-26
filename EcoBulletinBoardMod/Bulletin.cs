@@ -22,24 +22,43 @@ namespace Eco.Mods.BulletinBoard
     [Serialized]
     public class Bulletin : SimpleEntry
     {
-        [Serialized] public bool IsPublished { get; set; } = false;
+        [Serialized, SyncToView] public bool IsPublished { get; set; } 
 
-        [Serialized] public BulletinChannel Channel { get; set; } = null;
+        [Serialized, SyncToView] public BulletinChannel Channel { get; set; }
 
-        [Eco] public string Text { get; set; } = "";
+        [Serialized, SyncToView] public string Text { get; set; }
 
-        [SyncToView]
+        [Tooltip(100)]
         public override LocString Description()
         {
             var sb = new StringBuilder();
             if (IsPublished)
             {
                 
-                sb.AppendLine($"{UILinkContent()} published by {Creator?.UILink() ?? "nobody"} to {Channel?.UILink()} at {TimeFormatter.FormatDateLong(CreationTime)} ({TimeFormatter.FormatTimeSince(CreationTime, WorldTime.Seconds)} ago)");
+                sb.AppendLine($"Published to {Channel?.UILink()} at {TimeFormatter.FormatDateLong(CreationTime)} ({TimeFormatter.FormatTimeSince(CreationTime, WorldTime.Seconds)} ago)");
             }
             else
             {
-                sb.AppendLine($"{UILinkContent()} (draft) by {Creator?.UILink() ?? "nobody"}");
+                sb.AppendLine($"Unpublished");
+            }
+            sb.AppendLine(Text);
+            return sb.ToStringLoc();
+        }
+
+        public override LocString UILinkContent()
+            => TextLoc.ItemIcon("AuthComponent", Localizer.DoStr(this.Name));
+
+        public LocString FormatForBoard()
+        {
+            var sb = new StringBuilder();
+            if (IsPublished)
+            {
+
+                sb.AppendLine($"{this.UILink()} published by {Creator?.UILink() ?? "nobody"} at {TimeFormatter.FormatDateLong(CreationTime)} ({TimeFormatter.FormatTimeSince(CreationTime, WorldTime.Seconds)} ago)");
+            }
+            else
+            {
+                sb.AppendLine($"{this.UILink()} (unpublished) by {Creator?.UILink() ?? "nobody"}");
             }
             sb.AppendLine(Text);
             return sb.ToStringLoc();
@@ -47,12 +66,12 @@ namespace Eco.Mods.BulletinBoard
 
         public void Publish()
         {
-            if (IsPublished) { return; }
+            if (IsPublished || Channel == null) { return; }
             IsPublished = true;
             CreationTime = WorldTime.Seconds;
             SaveInRegistrar();
             ChatManager.ServerMessageToAlias(
-                new LocString($"{Creator.UILink()} has published a new bulletin under '{Channel?.UILink()}', check it out on the Ecopedia!"),
+                new LocString($"{Creator?.UILink() ?? "Someone"} has published {this.UILink()} to {Channel.UILink()}, check it out on the Ecopedia!"),
                 DemographicManager.Obj.Get(SpecialDemographics.Everyone),
                 category: MessageCategory.Mail
             );

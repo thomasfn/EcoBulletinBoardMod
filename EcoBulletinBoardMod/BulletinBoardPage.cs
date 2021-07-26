@@ -32,7 +32,7 @@ namespace Eco.Mods.BulletinBoard
             var sb = new StringBuilder();
             foreach (var bulletin in allBulletins)
             {
-                sb.AppendLine(bulletin.Description());
+                sb.AppendLine(bulletin.FormatForBoard());
             }
             return sb.ToString();
         }
